@@ -46,9 +46,11 @@ jobs:
         env:
           KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
         run: |
+          mkdir -p ~/.android
           if [ -n "$KEYSTORE_B64" ]; then
-            mkdir -p ~/.android
-            echo "$KEYSTORE_B64" | base64 -d > ~/.android/debug.keystore
+            echo "$KEYSTORE_B64" | base64 -d > /tmp/signing.bin
+            rm -f ~/.android/debug.keystore
+            keytool -importkeystore -srckeystore /tmp/signing.bin -srcstorepass android -destkeystore ~/.android/debug.keystore -deststoretype JKS -deststorepass android -destkeypass android -srcalias androiddebugkey -destalias androiddebugkey -noprompt
             echo "Using the permanent signing key"
           else
             echo "WARNING: no KEYSTORE_B64 secret, a random key will be used and updates will not install over older builds"
