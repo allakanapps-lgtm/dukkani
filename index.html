@@ -1133,13 +1133,14 @@ function productForm(id, pre = {}) {
       ${selF('pf-pu', 'الأسعار أدناه مُدخلة لكل', [['p', 'قطعة'], ['b', 'علبة'], ['c', 'طرد']], 'p', 'data-change="pfCalc"')}</div>
     <div class="two">${nfld('pf-price', '<span id="pf-pl1">سعر البيع</span>', p.price, 'data-input="pfCalc"')}${nfld('pf-cost', '<span id="pf-pl2">سعر التكلفة</span>', p.cost, 'data-input="pfCalc"')}</div>
     <div id="pf-calc" class="small muted"></div>
+    ${nfld('pf-mg', 'نسبة الربح % (فوق التكلفة)', '', 'placeholder="مثال: 10 — أو اكتب سعر البيع مباشرة"')}
     <div id="pf-pk2" class="two">${nfld('pf-pbox', 'سعر بيع العلبة (اختياري)', p.pBox || '', 'placeholder="تلقائي" data-input="pfCalc"')}${nfld('pf-pctn', 'سعر بيع الطرد (اختياري)', p.pCtn || '', 'placeholder="تلقائي" data-input="pfCalc"')}</div>
     <div class="two">${nfld('pf-stock', '<span id="pf-sl">' + (id ? 'الكمية الحالية' : 'الكمية الافتتاحية') + '</span>', p.stock, 'data-input="pfCalc"')}${nfld('pf-min', 'حد التنبيه (النقص)', p.min, `placeholder="${S.set.lowDefault}"`)}</div>
     <div id="pf-pk3" class="two">${nfld('pf-sb', 'يُضاف: علب', '', 'placeholder="0" data-input="pfCalc"')}${nfld('pf-sc', 'يُضاف: أطراد', '', 'placeholder="0" data-input="pfCalc"')}</div>
     ${fld('pf-exp', 'تاريخ الانتهاء', p.exp, 'type="date"')}
     <label class="gap"><input type="checkbox" id="pf-track" ${p.track === false ? '' : 'checked'}> تتبّع كمية هذا المنتج في المخزون</label>
     <p class="formerr" role="alert"></p><button class="btn primary block" type="submit">حفظ</button></form>`);
-  pfCalc();
+  PFMG.lock = false; pfCalc(); pfMgSync();
 }
 /* read packaging factors from the open product form */
 function pfFactors() {
@@ -1259,7 +1260,7 @@ function priceCardHtml() {
   <label class="gap"><input type="checkbox" id="pr-keep" checked> عند تحديث التكلفة فقط: حدّث سعر البيع بنفس نسبة الربح السابقة</label>
   <label class="gap"><input type="checkbox" id="pr-new"> أضف الأصناف غير الموجودة كمنتجات جديدة</label>
   <div id="pr-prev" class="small"></div><p class="formerr" role="alert"></p>
-  <div class="btnrow"><button class="btn" data-act="priPrev">معاينة</button><button class="btn primary" data-act="priRun">تطبيق</button></div></div>`;
+  <div class="btnrow"><button class="btn" data-act="priPrev">معاينة</button><button class="btn primary" data-act="priRun">تطبيق</button></div></div>` + mgBulkHtml();
 }
 const priChange = (r) => { const m = (v) => (r.p.cur === 'USD' ? fmtU(v) : fmtS(v)); const a = []; if (r.upd.cost != null) a.push(`تكلفة ${m(r.p.cost || 0)} ← <b>${m(r.upd.cost)}</b>`); if (r.upd.price != null) a.push(`بيع ${m(r.p.price)} ← <b>${m(r.upd.price)}</b>`); return a.join(' · '); };
 function priPreview() {
@@ -2393,6 +2394,32 @@ document.addEventListener('change', (e) => {
   if (d.ocr === 'inc') { r.inc = e.target.checked; return; }
   if (d.ocr === 'pid') { r.pid = e.target.value; const p = by('products', r.pid); if (p && !r.perEdit) { r.per = String(Number(p.pack) || 1); const el = document.getElementById('orper-' + i); if (el) el.value = r.per; } ocrPrev(i); return; }
   if (d.ocr === 'name') { r.name = e.target.value; const c = ocrCands(r.name, ''); r.cands = c.map((x) => x.p.id); r.pid = c[0] && c[0].s >= 9 ? c[0].p.id : '__new'; const row = document.getElementById('orow-' + i); if (row) { const h = document.createElement('div'); h.innerHTML = ocrRowHtml(r, i); row.replaceWith(h.firstElementChild); ocrPrev(i); } }
+});
+
+/* ================= profit-percent helpers (product form + bulk tool) ================= */
+let PFMG = { lock: false };
+const mgRound = (v, cur) => (cur === 'USD' ? Math.round(v * 1000) / 1000 : roundStep(v));
+function pfMgSync() { const el = document.getElementById('pf-mg'); if (!el || document.activeElement === el) return; const pr = toNum(val('pf-price')), co = toNum(val('pf-cost')); el.value = pr > 0 && co > 0 ? String(Math.round((pr / co - 1) * 1000) / 10) : ''; }
+document.addEventListener('input', (e) => {
+  const id = e.target && e.target.id; if (!id || !/^pf-(mg|price|cost)$/.test(id) || !document.getElementById('pf-mg')) return;
+  const cur = val('pf-cur') || 'SYP';
+  if (id === 'pf-mg') { PFMG.lock = true; const m = toNum(e.target.value), co = toNum(val('pf-cost')); if (m >= 0 && co > 0) { document.getElementById('pf-price').value = String(mgRound(co * (1 + m / 100), cur)); pfCalc(); } }
+  else if (id === 'pf-cost') { if (PFMG.lock) { const m = toNum(val('pf-mg')), co = toNum(e.target.value); if (m >= 0 && co > 0) { document.getElementById('pf-price').value = String(mgRound(co * (1 + m / 100), cur)); pfCalc(); } } else pfMgSync(); }
+  else { PFMG.lock = false; pfMgSync(); }
+});
+function mgBulkHtml() {
+  return `<div class="card stack-s"><h2>نسبة ربح على مجموعة أصناف</h2><p class="small muted">يضبط سعر البيع = التكلفة + النسبة. يشمل فقط الأصناف التي لها تكلفة مسجّلة. يعرض لك العدد قبل التطبيق.</p>
+  ${selF('mb-cat', 'الفئة', [['', 'كل الفئات']].concat(S.set.cats.map((c) => [c.n, c.n])), '')}
+  ${nfld('mb-pct', 'نسبة الربح % فوق التكلفة', '', 'placeholder="مثال: 15"')}
+  <div id="mb-prev" class="small"></div><div class="btnrow"><button class="btn" data-act="mbPrev">معاينة</button><button class="btn primary" data-act="mbRun">تطبيق</button></div></div>`;
+}
+function mgBulkRows() {
+  const cat = val('mb-cat'), m = toNum(val('mb-pct')); if (!(m >= 0)) return null;
+  return S.products.filter((p) => (!cat || p.cat === cat) && Number(p.cost) > 0).map((p) => ({ p, np: mgRound(p.cost * (1 + m / 100), p.cur) })).filter((r) => r.np !== r.p.price);
+}
+Object.assign(ACT, {
+  mbPrev: () => { const r = mgBulkRows(), el = document.getElementById('mb-prev'); if (!r) { el.textContent = 'اكتب النسبة أولاً.'; return; } el.innerHTML = `<b>${r.length}</b> صنف سيتغيّر سعره` + (r.length ? `<div class="card flush" style="margin-top:6px">${r.slice(0, 8).map((x) => `<div class="row"><span class="grow trunc">${esc(x.p.name)}</span><span class="small">${money(x.p.price, x.p.cur)} ← <b>${money(x.np, x.p.cur)}</b></span></div>`).join('')}</div>${r.length > 8 ? `<p class="small muted">… و${r.length - 8} غيرها</p>` : ''}` : ''); },
+  mbRun: () => { const r = mgBulkRows(), el = document.getElementById('mb-prev'); if (!r) { el.textContent = 'اكتب النسبة أولاً.'; return; } if (!r.length) { el.textContent = 'ما في أصناف تتغيّر.'; return; } for (const x of r) { x.p.price = x.np; x.p.updated = Date.now(); put('products', x.p); } toast('تم تحديث أسعار ' + r.length + ' صنف'); ACT.mbPrev(); },
 });
 
 (async function init() {
