@@ -17,6 +17,21 @@ jobs:
         run: |
           mkdir -p www
           cp index.html manifest.webmanifest sw.js icon-192.png icon-512.png www/
+      - name: Fetch offline OCR engine
+        continue-on-error: true
+        run: |
+          mkdir -p /tmp/ocrdl && cd /tmp/ocrdl && npm init -y >/dev/null
+          npm install tesseract.js@5.1.1 tesseract.js-core@5.1.1 @tesseract.js-data/ara @tesseract.js-data/eng
+          cd "$GITHUB_WORKSPACE"
+          mkdir -p www/ocr/lang
+          cp /tmp/ocrdl/node_modules/tesseract.js/dist/tesseract.min.js /tmp/ocrdl/node_modules/tesseract.js/dist/worker.min.js www/ocr/
+          cp /tmp/ocrdl/node_modules/tesseract.js-core/tesseract-core*lstm* www/ocr/
+          for L in ara eng; do
+            P=$(find /tmp/ocrdl/node_modules/@tesseract.js-data/$L -name "$L.traineddata.gz" | grep best_int | head -1)
+            [ -z "$P" ] && P=$(find /tmp/ocrdl/node_modules/@tesseract.js-data/$L -name "$L.traineddata.gz" | head -1)
+            cp "$P" www/ocr/lang/
+          done
+          ls -la www/ocr www/ocr/lang
       - name: Install Capacitor
         run: npm install
       - name: Add Android project

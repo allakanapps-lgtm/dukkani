@@ -688,11 +688,12 @@ function supBalance(sid) {
 }
 const toSyp = (amt, cur, d) => (cur === 'USD' ? Math.round(amt * (rateOn(d || today()) || curRate())) : Math.round(amt));
 /* a stock purchase: raises stock by cartons x pieces, updates unit cost; cash paid is a cash movement but NOT a profit expense (cost enters through COGS) */
-function makePurchase({ sup, date, cur, lines, paidCash, paidSham, payer, ref, note, photos }) {
+function makePurchase({ keepMg, sup, date, cur, lines, paidCash, paidSham, payer, ref, note, photos }) {
   const total = r2(sum(lines, (l) => l.total)); const paid = r2((paidCash || 0) + (paidSham || 0)); const id = uid();
   const rec = { id, ts: Date.now(), date: date || today(), sup: sup || '', cur, lines: lines.map((l) => ({ pid: l.pid, name: l.name, cartons: l.cartons, per: l.per, price: l.price, units: l.units, unitCost: l.unitCost, total: l.total })), total, paid, due: r2(total - paid), paidCash: paidCash || 0, paidSham: paidSham || 0, note: note || '', photos: photos || [] };
-  put('purchases', rec);
-  for (const l of lines) { const p = by('products', l.pid); if (!p) continue; stockMove(p, l.units, 'in', 'فاتورة شراء' + (sup && by('suppliers', sup) ? ' — ' + by('suppliers', sup).name : ''), id); p.pack = l.per > 1 ? l.per : p.pack; const uc = cur === p.cur ? l.unitCost : (p.cur === 'USD' ? l.unitCost / (curRate() || 1) : l.unitCost * (curRate() || 1)); p.cost = Math.round(uc * 10000) / 10000; if (sup) p.sup = p.sup || sup; p.updated = Date.now(); put('products', p); }
+  put('purchases', rec); let nPu = 0;
+  for (const l of lines) { const p = by('products', l.pid); if (!p) continue; stockMove(p, l.units, 'in', 'فاتورة شراء' + (sup && by('suppliers', sup) ? ' — ' + by('suppliers', sup).name : ''), id); p.pack = l.per > 1 ? l.per : p.pack; const uc = cur === p.cur ? l.unitCost : (p.cur === 'USD' ? l.unitCost / (curRate() || 1) : l.unitCost * (curRate() || 1)); const _oc = Number(p.cost) || 0; p.cost = Math.round(uc * 10000) / 10000; if (keepMg !== false && !(cur !== p.cur && !(curRate() > 0))) { const _np = mgPrice(Object.assign({}, p, { cost: _oc }), p.cost); if (_np != null && _np !== p.price) { p.price = _np; nPu++; } } if (sup) p.sup = p.sup || sup; p.updated = Date.now(); put('products', p); }
+  if (nPu) { rec.pu = nPu; put('purchases', rec); }
   const sn = sup && by('suppliers', sup) ? by('suppliers', sup).name : 'موزّع';
   if (paidCash > 0) addExpense({ cat: 'دفع لموزّع', amt: toSyp(paidCash, cur, rec.date), note: 'فاتورة شراء — ' + sn, method: 'cash', nopl: true, src: 'purchase', srcId: id, date: rec.date });
   if (paidSham > 0) addExpense({ cat: 'دفع لموزّع', amt: toSyp(paidSham, cur, rec.date), note: 'فاتورة شراء — ' + sn, method: 'sham', payer: payer || sn, ref: ref || '', nopl: true, src: 'purchase', srcId: id, date: rec.date });
@@ -1478,7 +1479,7 @@ VIEWS.cashbox = () => {
 /* ---------- supplier purchase invoice ---------- */
 let PUR = null;
 const purNew = (sup) => ({ sup: sup || '', cur: 'USD', date: today(), lines: [], pid: '', q: '', note: '', cash: '', sham: '', payer: '', ref: '', cartons: '1', per: '1', price: '', photos: [], zoom: 1 });
-function purCapture() { if (!PUR || !document.getElementById('pu-date')) return; PUR.sup = val('pu-sup'); PUR.date = val('pu-date') || PUR.date; PUR.note = val('pu-note'); PUR.cash = val('pu-cash'); PUR.sham = val('pu-sham'); PUR.payer = val('pu-payer'); PUR.ref = val('pu-ref'); PUR.cartons = val('pu-cartons') || PUR.cartons; PUR.per = val('pu-per') || PUR.per; PUR.price = val('pu-price'); }
+function purCapture() { if (!PUR || !document.getElementById('pu-date')) return; PUR.sup = val('pu-sup'); PUR.date = val('pu-date') || PUR.date; PUR.note = val('pu-note'); PUR.cash = val('pu-cash'); PUR.sham = val('pu-sham'); PUR.payer = val('pu-payer'); PUR.ref = val('pu-ref'); PUR.cartons = val('pu-cartons') || PUR.cartons; PUR.per = val('pu-per') || PUR.per; PUR.price = val('pu-price'); if (document.getElementById('pu-mg')) { PUR.mg = chk('pu-mg'); const dm = toNum(val('pu-dm')); if (dm >= 0 && dm !== Number(S.set.defMg)) { S.set.defMg = dm; saveSet(); } } }
 const purTotal = () => r2(sum(PUR.lines, (l) => l.total));
 function purLinePreview() {
   const p = by('products', PUR.pid); if (!p) return ''; const c = toNum(PUR.cartons), per = toNum(PUR.per), pr = toNum(PUR.price);
@@ -1490,7 +1491,7 @@ VIEWS.purchase = () => {
   if (!PUR) PUR = purNew(V.p.sup); const p = by('products', PUR.pid); const r = PUR.q ? searchProducts(PUR.q) : [];
   const tot = purTotal(); const pc = toNum(PUR.cash) || 0, ps = toNum(PUR.sham) || 0;
   return `${top('فاتورة شراء من موزّع')}<div class="stack">
-  <div class="card stack-s"><b>صورة الفاتورة (اختياري)</b><p class="small muted">تظهر هنا لتقرأ منها وتدخل الأرقام. التطبيق لا يقرأ الصورة تلقائياً.</p>${(PUR.photos || []).length ? `<div class="nbimg" style="max-height:34vh"><img data-pid="${PUR.photos[0]}" alt="الفاتورة" style="width:${PUR.zoom * 100}%"></div>${PUR.photos.length > 1 ? thumbsHtml(PUR.photos.slice(1)) : ''}<div class="gap"><button class="iconbtn" data-act="purZoom" data-d="-0.5" aria-label="تصغير">${ic('zoomout')}</button><button class="iconbtn" data-act="purZoom" data-d="0.5" aria-label="تكبير">${ic('zoomin')}</button></div>` : ''}
+  <div class="card stack-s"><b>صورة الفاتورة (اختياري)</b><p class="small muted">صوّر الفاتورة ثم اضغط «قراءة الفاتورة تلقائياً» ليقرأها التطبيق على جهازك بدون إنترنت، وراجع الأرقام قبل الإضافة.</p>${(PUR.photos || []).length ? `<button class="btn primary block" data-act="purOcr">${ic('search', 'sm')} قراءة الفاتورة تلقائياً</button>` : ''}${(PUR.photos || []).length ? `<div class="nbimg" style="max-height:34vh"><img data-pid="${PUR.photos[0]}" alt="الفاتورة" style="width:${PUR.zoom * 100}%"></div>${PUR.photos.length > 1 ? thumbsHtml(PUR.photos.slice(1)) : ''}<div class="gap"><button class="iconbtn" data-act="purZoom" data-d="-0.5" aria-label="تصغير">${ic('zoomout')}</button><button class="iconbtn" data-act="purZoom" data-d="0.5" aria-label="تكبير">${ic('zoomin')}</button></div>` : ''}
   <label class="btn sm" style="align-self:flex-start">${ic('camera', 'sm')} ${(PUR.photos || []).length ? 'إضافة صورة أخرى' : 'تصوير الفاتورة'}<input type="file" accept="image/*" capture="environment" hidden data-change="purPhoto"></label></div>
   <div class="two">${selF('pu-sup', 'الموزّع', [['', '— اختر —']].concat(S.suppliers.map((s) => [s.id, s.name])), PUR.sup)}${fld('pu-date', 'تاريخ الفاتورة', PUR.date, 'type="date"')}</div>
   <div class="field"><label>عملة الفاتورة</label>${seg('purCur', [['USD', 'دولار $'], ['SYP', 'ليرة']], PUR.cur)}</div>
@@ -1501,6 +1502,7 @@ VIEWS.purchase = () => {
    : `<div class="gap"><div class="search grow">${ic('search')}<input class="in" id="pu-q" data-input="purq" placeholder="ابحث عن المنتج أو امسح باركوده" value="${esc(PUR.q)}" autocomplete="off"></div><button class="iconbtn" data-act="purScan" aria-label="مسح" style="width:52px;height:48px">${ic('barcode')}</button></div>
    <div id="purres">${purResHtml(r)}</div>`}</div>
   ${PUR.lines.length ? `<div class="card flush">${PUR.lines.map((l, i) => `<div class="row"><span class="grow"><b class="trunc" style="display:block">${esc(l.name)}</b><span class="small muted">${fmtQ(l.cartons)} × ${fmtQ(l.per)} = ${fmtQ(l.units)} · تكلفة الوحدة ${PUR.cur === 'USD' ? fmtU(l.unitCost) : fmtS(l.unitCost)}</span></span><b class="num">${money(l.total, PUR.cur)}</b><button class="iconbtn" style="width:40px;height:40px" data-act="purDel" data-i="${i}" aria-label="حذف">${ic('x', 'sm')}</button></div>`).join('')}<div class="row"><b class="grow">إجمالي الفاتورة</b><b class="num">${money(tot, PUR.cur)}</b></div></div>` : ''}
+  <div class="card stack-s"><label class="gap"><input type="checkbox" id="pu-mg" ${PUR.mg !== false ? 'checked' : ''}> عدّل أسعار البيع تلقائياً مع الحفاظ على نسبة الربح</label>${nfld('pu-dm', 'نسبة الربح % للأصناف الجديدة (فوق التكلفة)', S.set.defMg != null ? S.set.defMg : 20)}<p class="small muted">الصنف الذي له تكلفة وسعر بيع سابقين يحافظ على نسبته نفسها. الصنف الجديد يأخذ هذه النسبة.</p></div>
   <div class="card stack-s"><b>الدفع</b><p class="small muted">اكتب ما دفعته الآن. الباقي يُسجَّل ديناً عليك للموزّع.</p><div class="two">${nfld('pu-cash', 'دفعت نقداً', PUR.cash, 'data-input="purPay"')}${nfld('pu-sham', 'دفعت عبر شام كاش', PUR.sham, 'data-input="purPay"')}</div>
   <div class="two">${fld('pu-payer', 'اسم المستلم (شام كاش)', PUR.payer)}${fld('pu-ref', 'مرجع العملية', PUR.ref)}</div>
   <div class="between"><span class="muted">المتبقي دين للموزّع</span><b class="num" id="pu-due">${money(Math.max(0, r2(tot - pc - ps)), PUR.cur)}</b></div></div>
@@ -1988,7 +1990,7 @@ const ACT = {
     if (!PUR.lines.length) return; if (pc < 0 || ps < 0 || pc + ps > tot + 0.001) { err.textContent = 'المدفوع أكبر من إجمالي الفاتورة.'; return; }
     if (tot - pc - ps > 0.001 && !PUR.sup) { err.textContent = 'اختر الموزّع لتسجيل المتبقي ديناً عليك.'; return; }
     if (!validDate(PUR.date)) { err.textContent = 'تاريخ غير صحيح.'; return; }
-    makePurchase({ sup: PUR.sup, date: PUR.date, cur: PUR.cur, lines: PUR.lines, paidCash: pc, paidSham: ps, payer: PUR.payer, ref: PUR.ref, note: PUR.note, photos: PUR.photos }); PUR = null; back(); toast('حُفظت الفاتورة وأُدخلت البضاعة للمخزون');
+    const rr_ = makePurchase({ keepMg: PUR.mg !== false, sup: PUR.sup, date: PUR.date, cur: PUR.cur, lines: PUR.lines, paidCash: pc, paidSham: ps, payer: PUR.payer, ref: PUR.ref, note: PUR.note, photos: PUR.photos }); PUR = null; back(); toast('حُفظت الفاتورة وأُدخلت البضاعة للمخزون' + (rr_ && rr_.pu ? ' · حُدّثت أسعار ' + rr_.pu + ' صنف' : ''));
   },
   purOpen: (el) => purchaseSheet(idOf(el)),
   purUndo: (el) => confirmSheet('إلغاء الفاتورة؟ تُخصم الكميات من المخزون وتُحذف دفعاتها.', 'purUndoDo', idOf(el), 'نعم، ألغِ'),
@@ -2215,7 +2217,7 @@ document.addEventListener('change', async (e) => {
     else if (k === 'nbAdd') { const fs = [...t.files]; t.value = ''; toast('جارٍ حفظ الصور…'); for (const f of fs) { const blob = await shrinkImage(f, 2000, 0.8); await photoPut({ id: 'p' + uid(), blob, ts: Date.now(), kind: 'nb', done: false, n: 0 }); } await loadPhotos(); render(false); toast('أُضيفت ' + fs.length + ' صورة'); }
     else if (k === 'restoreFile') { const f = t.files[0]; t.value = ''; if (!f) return; try { PEND_RESTORE = JSON.parse(await readFileText(f)); if (!PEND_RESTORE || PEND_RESTORE.app !== 'dukkani') throw new Error('ليس ملف نسخة من دكّاني'); restoreConfirm(); } catch (err) { toast('ملف غير صالح: ' + err.message); } }
     else if (k === 'attAdd') { const key = t.dataset.key; const fs = [...t.files]; t.value = ''; for (const f of fs) { try { ATT[key].push(await savePhotoFile(f, 'att')); } catch (err) { toast(err.message); } } attRender(key); }
-    else if (k === 'purPhoto') { const f = t.files[0]; t.value = ''; if (f) { purCapture(); PUR.photos.push(await savePhotoFile(f, 'att')); render(false); } }
+    else if (k === 'purPhoto') { const f = t.files[0]; t.value = ''; if (f) { purCapture(); const _id = await savePhotoFile(f, 'att'); PUR.photos.push(_id); (PUR.raw = PUR.raw || {})[_id] = f; render(false); } }
     else if (k === 'scanPhoto') Scan.photo(t.files[0]);
   } catch (err) { toast('خطأ: ' + err.message); if (window.console) console.error(err); }
 });
@@ -2223,12 +2225,184 @@ let hiddenAt = 0;
 document.addEventListener('visibilitychange', () => { if (!S.set.pin) return; if (document.hidden) hiddenAt = Date.now(); else if (hiddenAt && Date.now() - hiddenAt > 60000 && !LOCKED) { LOCKED = true; closeSheet(); closePhoto(); Scan.close(); render(false); } });
 
 /* ---------- start ---------- */
+/* ================= Allakan Apps: activation (paid app) ================= */
+const DK_WA = '963991139886', DK_PUB = 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE7b8NeXFnuJnT1w9ZavQk+ypAZ26DBHstP1Lc39Jxte+/I37yyvJ8uLdvM2Zsrweu44pRvloPoe74GSO/Yv1aHg==', DK_PACK = 'd1';
+let DK_DID = ''; try { DK_DID = localStorage.getItem('dk_did') || ''; if (!DK_DID) { const a = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; let x = ''; for (const b of crypto.getRandomValues(new Uint8Array(8))) x += a[b % 32]; DK_DID = x; localStorage.setItem('dk_did', x); } } catch (e) { DK_DID = DK_DID || 'NOSTORAGE'; }
+const dkB64 = (s) => { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; return Uint8Array.from(atob(s), (c) => c.charCodeAt(0)); };
+function dkDer2Raw(d) { if (d[0] !== 0x30) return null; let i = 2; if (d[1] & 0x80) i = 2 + (d[1] & 0x7f); const rd = () => { if (d[i] !== 2) return null; const l = d[i + 1]; i += 2; let v = d.slice(i, i + l); i += l; while (v.length > 32 && v[0] === 0) v = v.slice(1); const o = new Uint8Array(32); o.set(v, 32 - v.length); return o; }; const r = rd(), s = rd(); if (!r || !s) return null; const o = new Uint8Array(64); o.set(r); o.set(s, 32); return o; }
+async function dkVerify(code) {
+  try {
+    const m = String(code || '').trim().match(/^([A-Za-z0-9]+)-([A-Za-z0-9_-]+)$/); if (!m || !crypto.subtle) return false; let sig = dkB64(m[2]); if (sig.length !== 64) sig = dkDer2Raw(sig); if (!sig) return false;
+    const key = await crypto.subtle.importKey('spki', dkB64(DK_PUB), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
+    return m[1] === DK_PACK && await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, key, sig, new TextEncoder().encode(DK_DID + '|' + m[1]));
+  } catch (e) { return false; }
+}
+async function actCheck() { let c = ''; try { c = localStorage.getItem('dk_act') || ''; } catch (e) { /* ignore */ } return c ? dkVerify(c) : false; }
+function actScreen() {
+  const did = DK_DID.replace(/(.{4})/g, '$1-').slice(0, -1);
+  const wa = `https://wa.me/${DK_WA}?text=${encodeURIComponent('Dukkani app (Allakan Apps) - activation\nDevice ID: ' + DK_DID + '\nPack: ' + DK_PACK)}`;
+  const d = document.createElement('div'); d.id = 'act-screen';
+  d.style.cssText = 'position:fixed;inset:0;z-index:9999;background:var(--bg,#fff);color:var(--ink,#111);overflow:auto;padding:24px 18px;display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center';
+  d.innerHTML = `<div style="max-width:420px;width:100%;display:flex;flex-direction:column;gap:14px"><h1 style="font-size:28px;margin-top:20px">دكّاني</h1><p>التطبيق مدفوع. للتفعيل اطلب كود خاص بجهازك عبر واتساب.</p>
+  <a class="btn primary block" target="_blank" rel="noopener" href="${wa}" style="display:block;text-decoration:none">💬 اطلب كود التفعيل عبر واتساب</a>
+  <div class="card"><div class="small muted">رقم جهازك</div><b dir="ltr" style="font-size:20px;letter-spacing:1px">${did}</b></div>
+  <input class="in" id="act-code" dir="ltr" placeholder="الصق كود التفعيل هون" autocomplete="off" style="text-align:center">
+  <button class="btn primary block" id="act-go">تفعيل</button><p id="act-msg" class="formerr" role="alert"></p><p class="small muted">Allakan Apps · allakanapps@gmail.com</p></div>`;
+  document.body.appendChild(d);
+  document.getElementById('act-go').onclick = async () => { const c = document.getElementById('act-code').value.trim(); const msg = document.getElementById('act-msg'); if (await dkVerify(c)) { try { localStorage.setItem('dk_act', c); } catch (e) { /* ignore */ } location.reload(); } else msg.textContent = 'الكود غير صحيح لهذا الجهاز. تأكد أنك نسخته كاملاً.'; };
+}
+
+/* ================= supplier invoice: photo -> text (offline OCR) -> stock lines ================= */
+const mgPrice = (p, newCost) => {
+  const oc = Number(p.cost) || 0, op = Number(p.price) || 0; if (!(newCost > 0)) return null; let np;
+  if (oc > 0 && op > 0) { if (Math.abs(newCost - oc) < 1e-9) return null; np = newCost * op / oc; }
+  else if (op <= 0) { const d = Number(S.set.defMg); np = newCost * (1 + (d >= 0 ? d : 20) / 100); }
+  else return null;
+  return p.cur === 'USD' ? Math.round(np * 1000) / 1000 : roundStep(np);
+};
+const costIn = (p, uc, cur) => (cur === p.cur ? uc : !(curRate() > 0) ? NaN : p.cur === 'USD' ? uc / curRate() : uc * curRate());
+const OCR_SKIP = /(مجموع|المجموع|إجمالي|اجمالي|الاجمالي|الإجمالي|صافي|خصم|ضريبة|رصيد|مدفوع|المتبقي|الباقي|تاريخ|هاتف|جوال|موبايل|فاتورة|العنوان|المورد|التوقيع|المستلم|شكرا|الكمية|السعر|الصنف|البيان|الإفرادي|total|subtotal|invoice|date|tel|phone|qty|price|amount|balance|vat|tax|discount)/i;
+function parseInvoiceText(text) {
+  const out = []; const UNIT = '(?:كغ|كيلو|كج|kg|KG|Kg|غرام|جرام|غ|gr|gm|g|ml|ملل|مل|لتر|ل|L|l|سم|cm|متر)';
+  for (let raw of String(text || '').split(/\n+/)) {
+    let t = normDigits(raw).replace(/،/g, ',').replace(/(\d),(?=\d{3}(?!\d))/g, '$1').replace(/[|_~•·●■□▪◦]/g, ' ').replace(/\s+/g, ' ').trim(); if (!t) continue;
+    if ((t.match(/[؀-ۿA-Za-z]/g) || []).length < 2) continue;
+    const skip = OCR_SKIP.test(t); const nSk = (t.match(OCR_SKIP) || []).length; if (skip && (nSk >= 2 || !/\d/.test(t) || /(مجموع|إجمالي|اجمالي|صافي|total|رصيد|خصم|ضريبة|مدفوع|المتبقي)/i.test(t))) continue;
+    let bc = ''; const bcm = t.match(/\b\d{8,14}\b/); if (bcm) { bc = bcm[0]; t = t.replace(bc, ' '); }
+    const re = new RegExp('(\\d+(?:\\.\\d+)?)\\s*(' + UNIT + ')?(?![\\p{L}\\d])', 'gu'); const nums = []; const keep = []; let m;
+    while ((m = re.exec(t))) { if (m[2]) keep.push([m.index, re.lastIndex]); else nums.push({ v: +m[1], i: m.index, e: re.lastIndex }); }
+    if (!nums.length) continue;
+    let q = null, pr = null, flag = false; let c = nums.map((x) => x.v);
+    const rel = (a, b, k) => a > 0 && b >= 0 && k > 0 && Math.abs(a * b - k) <= Math.max(0.011 * k, 0.011);
+    if (c.length >= 3) {
+      const l3 = c.slice(-3); let f = null; const P = [[0, 1, 2], [1, 0, 2], [0, 2, 1], [2, 0, 1], [1, 2, 0], [2, 1, 0]];
+      for (const [a, b, k] of P) { if (rel(l3[a], l3[b], l3[k]) && l3[a] <= 5000) { if (!f || l3[a] < f[0]) f = [l3[a], l3[b]]; } }
+      if (f) { q = f[0]; pr = f[1]; } else { c = c.slice(-2); }
+    }
+    if (q === null) {
+      if (c.length >= 3) c = c.slice(-2);
+      if (c.length === 3) { /* unreachable */ }
+      if (c.length === 2) { const [x, y] = c; const lo = Math.min(x, y), hi = Math.max(x, y); if (Number.isInteger(lo) && lo <= 5000) { q = lo; pr = hi; } else { q = x; pr = y; } flag = x === y; }
+      else { q = 1; pr = c[0]; flag = true; }
+    }
+    let name = t; const rm = nums.map((x) => [x.i, x.e]).sort((a, b) => b[0] - a[0]); for (const [a, b] of rm) name = name.slice(0, a) + ' ' + name.slice(b);
+    name = name.replace(/\$|دولار|ل\.?\s?س|ليرة|ليره|USD|SYP/gi, ' ').replace(/[:=\-–—_…،؛|>*#()\[\]{}<«»"']+/g, ' ').replace(/(?<!\d)\.+|\.+(?!\d)/g, ' ').replace(/\s+/g, ' ').trim();
+    if ((name.match(/[؀-ۿA-Za-z]/g) || []).length < 2) continue;
+    if (!(q > 0) || !(pr >= 0)) continue;
+    out.push({ raw: raw.trim(), name, qty: q, price: pr, bc, flag });
+  }
+  return out;
+}
+const lev1 = (a, b) => { if (a === b) return true; if (Math.abs(a.length - b.length) > 1) return false; let i = 0; while (i < a.length && i < b.length && a[i] === b[i]) i++; if (a.length === b.length) return a.slice(i + 1) === b.slice(i + 1); return a.length > b.length ? a.slice(i + 1) === b.slice(i) : b.slice(i + 1) === a.slice(i); };
+function ocrScore(pn, ln) {
+  if (!pn || !ln) return 0; let s = matchScore(pn, ln) * 10;
+  const a = pn.split(/\s+/).filter((w) => w.length > 1), b = ln.split(/\s+/).filter((w) => w.length > 1); if (!a.length || !b.length) return s;
+  let hit = 0; for (const w of b) if (a.some((x) => x === w || (w.length > 3 && lev1(x, w)))) hit++; const r = hit / Math.max(a.length, b.length); return s + r * 10;
+}
+function ocrCands(name, bc) {
+  const o = []; if (bc) { const p = findBarcode(bc); if (p) o.push({ p, s: 99 }); } const ln = nrm(name);
+  for (const p of S.products) { if (o.some((x) => x.p === p)) continue; const s = ocrScore(nrm(p.name), ln); if (s >= 4) o.push({ p, s }); }
+  return o.sort((a, b) => b.s - a.s).slice(0, 8);
+}
+let OCRR = null;
+function ocrMakeRows(text) {
+  return parseInvoiceText(text).map((r) => { const c = ocrCands(r.name, r.bc); const best = c[0] && c[0].s >= 9 ? c[0].p : null; const per = best ? (Number(best.pack) || 1) : 1; return { inc: true, name: r.name, qty: String(r.qty), price: String(r.price), per: String(per), perEdit: false, pid: best ? best.id : '__new', cands: c.map((x) => x.p.id), flag: r.flag, raw: r.raw }; });
+}
+function ocrPrev(i) {
+  const r = OCRR.rows[i], el = document.getElementById('orp-' + i); if (!el) return; const q = toNum(r.qty), pr = toNum(r.price), per = OCRR.mode === 'c' ? toNum(r.per) : 1;
+  if (!(q > 0 && pr >= 0 && per > 0)) { el.innerHTML = '<span class="muted">راجع الأرقام</span>'; return; }
+  const uc = pr / per; const p = by('products', r.pid); const cur = PUR ? PUR.cur : 'USD'; let h = `${fmtQ(q)} × ${fmtQ(per)} = <b>${fmtQ(q * per)}</b> قطعة · تكلفة القطعة <b>${money(uc, cur)}</b>`;
+  if (p) { const np = mgPrice(p, costIn(p, uc, cur)); if (np != null && S.set.autoMgOn !== false && (!PUR || PUR.mg !== false)) h += `<br>سعر البيع: ${money(p.price, p.cur)} ← <b>${money(np, p.cur)}</b>`; } else if (r.pid === '__new') h += '<br><span class="muted">صنف جديد</span>';
+  el.innerHTML = h;
+}
+function ocrRowHtml(r, i) {
+  const opts = r.cands.map((id) => by('products', id)).filter(Boolean).map((p) => [p.id, p.name]);
+  const sel = [['__new', '➕ صنف جديد بهذا الاسم']].concat(opts).concat([['__skip', '⛔ تجاهل هذا السطر']]);
+  return `<div class="card stack-s" id="orow-${i}" style="${r.flag ? 'border-color:var(--warn)' : ''}">
+  <label class="gap"><input type="checkbox" data-ocr="inc" data-i="${i}" ${r.inc ? 'checked' : ''}> <b>اسم الصنف في الفاتورة</b></label>
+  <input class="in" data-ocr="name" data-i="${i}" value="${esc(r.name)}" autocomplete="off">
+  <div class="field"><label>الصنف في مخزونك</label><select class="in" id="ors-${i}" data-ocr="pid" data-i="${i}">${sel.map(([k, t]) => `<option value="${esc(k)}" ${String(k) === String(r.pid) ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></div>
+  <div class="two"><div class="field"><label>الكمية</label><input class="in" inputmode="decimal" data-ocr="qty" data-i="${i}" value="${esc(r.qty)}"></div>
+  <div class="field"><label>${OCRR.mode === 'c' ? 'سعر الكرتونة' : 'سعر القطعة'}</label><input class="in" inputmode="decimal" data-ocr="price" data-i="${i}" value="${esc(r.price)}"></div></div>
+  ${OCRR.mode === 'c' ? `<div class="field"><label>القطع بالكرتونة</label><input class="in" id="orper-${i}" inputmode="decimal" data-ocr="per" data-i="${i}" value="${esc(r.per)}"></div>` : ''}
+  <div class="small" id="orp-${i}"></div></div>`;
+}
+function ocrSheet(msg) {
+  const cur = PUR ? PUR.cur : 'USD';
+  sheet(`<div class="grab"></div><h2>قراءة الفاتورة</h2><div class="stack">
+  ${msg ? `<p class="small" style="color:var(--warn)">${esc(msg)}</p>` : ''}
+  <p class="small muted">راجع كل سطر وصحّح الأرقام والأصناف قبل الإضافة. قراءة الصورة غير مضمونة 100%، خصوصاً الخط اليدوي.</p>
+  <div class="field"><label>الكميات والأسعار في الفاتورة هي لكل</label><select class="in" id="ocr-mode" data-ocr="mode"><option value="c" ${OCRR.mode === 'c' ? 'selected' : ''}>كرتونة (أحدد القطع بالكرتونة)</option><option value="p" ${OCRR.mode === 'p' ? 'selected' : ''}>قطعة</option></select></div>
+  <p class="small muted">عملة الفاتورة: <b>${cur === 'USD' ? 'دولار $' : 'ليرة'}</b> (تتغيّر من شاشة الفاتورة)</p>
+  <div id="ocr-rows" class="stack-s">${OCRR.rows.length ? OCRR.rows.map(ocrRowHtml).join('') : '<p class="muted">ما قدرت أطلع أصنافاً من النص. عدّل النص تحت واضغط «تحليل النص».</p>'}</div>
+  <details ${OCRR.rows.length ? '' : 'open'}><summary>النص المقروء (قابل للتعديل)</summary><textarea class="in" id="ocr-raw" rows="8" style="min-height:140px" dir="auto">${esc(OCRR.text)}</textarea><button class="btn sm" data-act="ocrParse" type="button" style="margin-top:6px">تحليل النص</button></details>
+  <p class="formerr" role="alert" id="ocr-err"></p><button class="btn primary block" data-act="ocrApply" ${OCRR.rows.length ? '' : 'disabled'}>إضافة الأصناف المحددة للفاتورة</button></div>`);
+  OCRR.rows.forEach((_, i) => ocrPrev(i));
+}
+function ocrLoadLib() {
+  return window.Tesseract ? Promise.resolve() : new Promise((res, rej) => { const s = document.createElement('script'); s.src = new URL('ocr/tesseract.min.js', location.href).href; s.onload = res; s.onerror = () => rej(new Error('محرّك القراءة غير موجود في هذه النسخة')); document.head.appendChild(s); });
+}
+async function ocrPrep(blob) {
+  const bmp = await new Promise((res, rej) => { const im = new Image(); const u = URL.createObjectURL(blob); im.onload = () => { URL.revokeObjectURL(u); res(im); }; im.onerror = () => { URL.revokeObjectURL(u); rej(new Error('صورة غير مقروءة')); }; im.src = u; });
+  const L = Math.max(bmp.width, bmp.height); const sc = L < 1600 ? Math.min(2, 1800 / L) : Math.min(1, 2400 / L); const cv = document.createElement('canvas'); cv.width = Math.round(bmp.width * sc); cv.height = Math.round(bmp.height * sc);
+  const cx = cv.getContext('2d'); cx.drawImage(bmp, 0, 0, cv.width, cv.height);
+  try { const im = cx.getImageData(0, 0, cv.width, cv.height), d = im.data; const h = new Uint32Array(256); for (let i = 0; i < d.length; i += 4) { const g = (d[i] * 3 + d[i + 1] * 6 + d[i + 2]) / 10 | 0; d[i] = d[i + 1] = d[i + 2] = g; h[g]++; }
+    const n = d.length / 4; let a = 0, lo = 0, hi = 255; for (lo = 0; lo < 255; lo++) { a += h[lo]; if (a > n * 0.01) break; } a = 0; for (hi = 255; hi > 0; hi--) { a += h[hi]; if (a > n * 0.01) break; } const k = hi > lo + 10 ? 255 / (hi - lo) : 1;
+    for (let i = 0; i < d.length; i += 4) { const v = Math.max(0, Math.min(255, (d[i] - lo) * k)); d[i] = d[i + 1] = d[i + 2] = v; } cx.putImageData(im, 0, 0); } catch (e) { /* keep colour */ }
+  return new Promise((res) => cv.toBlob((b) => res(b || blob), 'image/png'));
+}
+async function ocrRun(blobs) {
+  await ocrLoadLib(); const abs = (p) => new URL(p, location.href).href; let w = null; let txt = '';
+  try {
+    w = await Tesseract.createWorker(['ara', 'eng'], 1, { workerPath: abs('ocr/worker.min.js'), corePath: abs('ocr/'), langPath: abs('ocr/lang'), gzip: true, cacheMethod: 'none', logger: (m) => { const el = document.getElementById('ocr-prog'); if (el && m && typeof m.progress === 'number') el.textContent = Math.round(m.progress * 100) + '% — ' + (m.status || ''); } });
+    try { await w.setParameters({ preserve_interword_spaces: '1', tessedit_pageseg_mode: '6' }); } catch (e) { /* ignore */ }
+    for (const b of blobs) { const r = await w.recognize(await ocrPrep(b)); txt += (r && r.data && r.data.text ? r.data.text : '') + '\n'; }
+  } finally { try { if (w) await w.terminate(); } catch (e) { /* ignore */ } }
+  return txt;
+}
+Object.assign(ACT, {
+  purOcr: async () => {
+    purCapture(); if (!PUR || !PUR.photos.length) { toast('صوّر الفاتورة أولاً'); return; }
+    sheet('<div class="grab"></div><h2>قراءة الفاتورة</h2><div class="stack"><p>جارٍ قراءة الصورة على جهازك… قد تأخذ نصف دقيقة. لا تخرج من الشاشة.</p><p class="num" id="ocr-prog">…</p></div>');
+    let text = '', err = '';
+    try { const blobs = []; for (const id of PUR.photos) { const f = PUR.raw && PUR.raw[id]; if (f) blobs.push(f); else { const r = await photoGet(id); if (r && r.blob) blobs.push(r.blob); } } text = await ocrRun(blobs); } catch (e) { err = 'تعذّرت القراءة التلقائية: ' + (e && e.message ? e.message : e) + '. تقدر تكتب/تلصق نص الفاتورة تحت.'; }
+    OCRR = { mode: 'c', text: text.trim(), rows: [] }; if (text.trim()) OCRR.rows = ocrMakeRows(text); ocrSheet(err);
+  },
+  ocrParse: () => { OCRR.text = val('ocr-raw'); OCRR.rows = ocrMakeRows(OCRR.text); ocrSheet(''); },
+  ocrApply: () => {
+    const err = document.getElementById('ocr-err'); const lines = []; const ex = [];
+    for (const [i, r] of OCRR.rows.entries()) {
+      if (!r.inc || r.pid === '__skip') continue; const q = toNum(r.qty), pr = toNum(r.price), per = OCRR.mode === 'c' ? toNum(r.per) : 1;
+      if (!(q > 0) || !(pr >= 0) || !(per > 0) || !r.name) { err.textContent = `راجع السطر ${i + 1}: الكمية أو السعر أو عدد القطع غير صحيح.`; document.getElementById('orow-' + i).scrollIntoView({ block: 'center' }); return; }
+      lines.push({ r, q, pr, per });
+    }
+    if (!lines.length) { err.textContent = 'ما في أصناف محددة.'; return; }
+    for (const { r, q, pr, per } of lines) {
+      let p = r.pid === '__new' ? null : by('products', r.pid);
+      if (!p) { const o = upsertProduct({ name: r.name, price: 0, cur: PUR.cur, cat: 'أخرى', cost: 0, sup: PUR.sup || '' }); p = o.rec; if (per > 1) { p.pack = per; put('products', p); } }
+      PUR.lines.push({ pid: p.id, name: p.name, cartons: q, per, price: pr, units: Math.round(q * per * 1000) / 1000, unitCost: pr / per, total: r2(q * pr) });
+    }
+    closeSheet(); render(false); toast('أُضيف ' + lines.length + ' صنف للفاتورة — راجعها ثم أدخل الدفع واحفظ');
+  },
+});
+document.addEventListener('input', (e) => {
+  const d = e.target.dataset; if (!d || !d.ocr || !OCRR || d.ocr === 'mode') return; const i = +d.i, r = OCRR.rows[i]; if (!r) return;
+  if (d.ocr === 'name') { r.name = e.target.value; return; } if (d.ocr === 'qty' || d.ocr === 'price') r[d.ocr] = e.target.value; else if (d.ocr === 'per') { r.per = e.target.value; r.perEdit = true; } ocrPrev(i);
+});
+document.addEventListener('change', (e) => {
+  const d = e.target.dataset; if (!d || !d.ocr || !OCRR) return;
+  if (d.ocr === 'mode') { OCRR.mode = e.target.value; ocrSheet(''); return; } const i = +d.i, r = OCRR.rows[i]; if (!r) return;
+  if (d.ocr === 'inc') { r.inc = e.target.checked; return; }
+  if (d.ocr === 'pid') { r.pid = e.target.value; const p = by('products', r.pid); if (p && !r.perEdit) { r.per = String(Number(p.pack) || 1); const el = document.getElementById('orper-' + i); if (el) el.value = r.per; } ocrPrev(i); return; }
+  if (d.ocr === 'name') { r.name = e.target.value; const c = ocrCands(r.name, ''); r.cands = c.map((x) => x.p.id); r.pid = c[0] && c[0].s >= 9 ? c[0].p.id : '__new'; const row = document.getElementById('orow-' + i); if (row) { const h = document.createElement('div'); h.innerHTML = ocrRowHtml(r, i); row.replaceWith(h.firstElementChild); ocrPrev(i); } }
+});
+
 (async function init() {
-  await loadAll(); migrate(); applyTheme(); i18nInit(); if (S.set.pin) LOCKED = true;
+  await loadAll(); migrate(); applyTheme(); i18nInit(); if (!(await actCheck())) { actScreen(); return; } if (S.set.pin) LOCKED = true;
   try { history.replaceState({ d: 0 }, ''); } catch (e) { /* ignore */ }
   render(true); takeSnapshot().catch(() => {}); loadPhotos().catch(() => {});
   try { if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) navigator.serviceWorker.register('./sw.js').catch(() => {}); } catch (e) { /* ignore */ }
-  window.__dk = { Scan, S, ean13Svg, curRate, go, tab, ACT, VIEWS, setLangUI, i18nRun, put, makeSale, addLedger, addExpense, soonOut, summaryText, makePurchase, makePurchaseReturn, undoPurchase, supBalance, cashBalance };
+  window.__dk = { parseInvoiceText, ocrMakeRows, mgPrice, dkVerify, Scan, S, ean13Svg, curRate, go, tab, ACT, VIEWS, setLangUI, i18nRun, put, makeSale, addLedger, addExpense, soonOut, summaryText, makePurchase, makePurchaseReturn, undoPurchase, supBalance, cashBalance };
   const snaps = await listSnaps().catch(() => []); window.__snaps = snaps;
 })();
 VIEWS_BACKUP_PATCH: {
