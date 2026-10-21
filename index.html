@@ -452,7 +452,7 @@ function dbDel(store, id) { if (!DB) return; try { const tx = DB.transaction(sto
 const saveSet = () => dbPut('meta', { k: 'set', v: S.set });
 /* put a record in a store (insert or replace) */
 let _ix = null;
-function put(store, rec) { if (store === 'ledger') _ix = null; const a = S[store]; const i = a.findIndex((x) => x.id === rec.id); if (i < 0) a.push(rec); else a[i] = rec; dbPut(store, rec); return rec; }
+function put(store, rec) { dkPutCheck(store, rec); if (store === 'ledger') _ix = null; const a = S[store]; const i = a.findIndex((x) => x.id === rec.id); if (i < 0) a.push(rec); else a[i] = rec; dbPut(store, rec); return rec; }
 function del(store, id) { if (store === 'ledger') _ix = null; const i = S[store].findIndex((x) => x.id === id); if (i >= 0) S[store].splice(i, 1); dbDel(store, id); }
 const by = (store, id) => S[store].find((x) => x.id === id);
 function photoPut(rec) { return new Promise((res, rej) => { if (!DB) return rej(new Error('no db')); const tx = DB.transaction('photos', 'readwrite'); tx.objectStore('photos').put(rec); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); }); }
@@ -1714,7 +1714,7 @@ async function restoreFrom(o, photos) {
 function migrate() { /* data-format upgrades between app versions go here; S.set.ver tracks the format */ S.set.ver = S.set.ver || 1; if (S.set.ver < 2) { if (!catOf('بهارات وتوابل')) { const i = S.set.cats.findIndex((c) => c.n === 'أخرى'); S.set.cats.splice(i < 0 ? S.set.cats.length : i, 0, { n: 'بهارات وتوابل' }); } S.set.ver = 2; } saveSet(); }
 
 /* ---------- settings ---------- */
-VIEWS.settings = () => `${top('الإعدادات')}<div class="stack">
+VIEWS.settings = () => `${top('الإعدادات')}<div class="stack">${dkCard()}
   <form class="card stack" data-submit="setSave" autocomplete="off"><h2>المحل والأسعار</h2>${fld('s-shop', 'اسم المحل', S.set.shop)}
   ${selF('s-step', 'تقريب أسعار البيع بالليرة إلى أقرب', [[1, '1'], [5, '5'], [10, '10'], [50, '50'], [100, '100'], [500, '500'], [1000, '1,000']], S.set.step)}
   <div class="two">${nfld('s-low', 'حد النقص الافتراضي', S.set.lowDefault)}${nfld('s-exp', 'التنبيه قبل الانتهاء (يوم)', S.set.expDays)}</div>
@@ -2187,8 +2187,8 @@ const SUBMIT = {
 };
 
 /* ---------- global events ---------- */
-document.addEventListener('click', (e) => { const el = e.target.closest('[data-act]'); if (!el) return; const fn = ACT[el.dataset.act]; if (fn) { try { fn(el, e); } catch (err) { toast('خطأ: ' + err.message); if (window.console) console.error(err); } } });
-document.addEventListener('submit', (e) => { const f = e.target.closest('[data-submit]'); if (!f) return; e.preventDefault(); const fn = SUBMIT[f.dataset.submit]; if (fn) { try { fn(f); } catch (err) { toast('خطأ: ' + err.message); if (window.console) console.error(err); } } });
+document.addEventListener('click', (e) => { const el = e.target.closest('[data-act]'); if (!el) return; const fn = ACT[el.dataset.act]; if (fn) { try { fn(el, e); } catch (err) { if (!err.dkLimit) toast('خطأ: ' + err.message); if (window.console) console.error(err); } } });
+document.addEventListener('submit', (e) => { const f = e.target.closest('[data-submit]'); if (!f) return; e.preventDefault(); const fn = SUBMIT[f.dataset.submit]; if (fn) { try { fn(f); } catch (err) { if (!err.dkLimit) toast('خطأ: ' + err.message); if (window.console) console.error(err); } } });
 document.addEventListener('input', (e) => {
   const k = e.target.dataset && e.target.dataset.input; if (!k) return; const v = e.target.value;
   if (k === 'plist') { V.p.q = v; $('#plist').innerHTML = plistHtml(); } else if (k === 'stlist') { V.p.q = v; $('#stlist').innerHTML = stlistHtml(); } else if (k === 'clist') { V.p.q = v; $('#clist').innerHTML = clistHtml(); }
@@ -2219,7 +2219,7 @@ document.addEventListener('change', async (e) => {
     else if (k === 'attAdd') { const key = t.dataset.key; const fs = [...t.files]; t.value = ''; for (const f of fs) { try { ATT[key].push(await savePhotoFile(f, 'att')); } catch (err) { toast(err.message); } } attRender(key); }
     else if (k === 'purPhoto') { const f = t.files[0]; t.value = ''; if (f) { purCapture(); const _id = await savePhotoFile(f, 'att'); PUR.photos.push(_id); (PUR.raw = PUR.raw || {})[_id] = f; render(false); } }
     else if (k === 'scanPhoto') Scan.photo(t.files[0]);
-  } catch (err) { toast('خطأ: ' + err.message); if (window.console) console.error(err); }
+  } catch (err) { if (!err.dkLimit) toast('خطأ: ' + err.message); if (window.console) console.error(err); }
 });
 let hiddenAt = 0;
 document.addEventListener('visibilitychange', () => { if (!S.set.pin) return; if (document.hidden) hiddenAt = Date.now(); else if (hiddenAt && Date.now() - hiddenAt > 60000 && !LOCKED) { LOCKED = true; closeSheet(); closePhoto(); Scan.close(); render(false); } });
@@ -2238,19 +2238,16 @@ async function dkVerify(code) {
   } catch (e) { return false; }
 }
 async function actCheck() { let c = ''; try { c = localStorage.getItem('dk_act') || ''; } catch (e) { /* ignore */ } return c ? dkVerify(c) : false; }
-function actScreen() {
-  const did = DK_DID.replace(/(.{4})/g, '$1-').slice(0, -1);
-  const wa = `https://wa.me/${DK_WA}?text=${encodeURIComponent('Dukkani app (Allakan Apps) - activation\nDevice ID: ' + DK_DID + '\nPack: ' + DK_PACK)}`;
-  const d = document.createElement('div'); d.id = 'act-screen';
-  d.style.cssText = 'position:fixed;inset:0;z-index:9999;background:var(--bg,#fff);color:var(--ink,#111);overflow:auto;padding:24px 18px;display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center';
-  d.innerHTML = `<div style="max-width:420px;width:100%;display:flex;flex-direction:column;gap:14px"><h1 style="font-size:28px;margin-top:20px">دكّاني</h1><p>التطبيق مدفوع. للتفعيل اطلب كود خاص بجهازك عبر واتساب.</p>
-  <a class="btn primary block" target="_blank" rel="noopener" href="${wa}" style="display:block;text-decoration:none">💬 اطلب كود التفعيل عبر واتساب</a>
-  <div class="card"><div class="small muted">رقم جهازك</div><b dir="ltr" style="font-size:20px;letter-spacing:1px">${did}</b></div>
-  <input class="in" id="act-code" dir="ltr" placeholder="الصق كود التفعيل هون" autocomplete="off" style="text-align:center">
-  <button class="btn primary block" id="act-go">تفعيل</button><p id="act-msg" class="formerr" role="alert"></p><p class="small muted">Allakan Apps · allakanapps@gmail.com</p></div>`;
-  document.body.appendChild(d);
-  document.getElementById('act-go').onclick = async () => { const c = document.getElementById('act-code').value.trim(); const msg = document.getElementById('act-msg'); if (await dkVerify(c)) { try { localStorage.setItem('dk_act', c); } catch (e) { /* ignore */ } location.reload(); } else msg.textContent = 'الكود غير صحيح لهذا الجهاز. تأكد أنك نسخته كاملاً.'; };
-}
+let DK_PRO = false; const DK_FREE_P = 5, DK_FREE_C = 2;
+function dkBlock() { const did = DK_DID.replace(/(.{4})/g, '$1-').slice(0, -1); const wa = `https://wa.me/${DK_WA}?text=${encodeURIComponent('Dukkani app (Allakan Apps) - activation\nDevice ID: ' + DK_DID + '\nPack: ' + DK_PACK)}`;
+  return `<div class="card stack-s"><b>⭐ النسخة الكاملة</b><p class="small muted">بدون حد للمواد والزبائن، وتعمل كل الميزات.</p>
+  <a class="btn primary block" target="_blank" rel="noopener" href="${wa}" style="display:block;text-align:center;text-decoration:none">💬 اطلب كود التفعيل عبر واتساب</a>
+  <div class="small muted">رقم جهازك: <b dir="ltr">${did}</b></div>
+  <input class="in" id="act-code" dir="ltr" placeholder="الصق كود التفعيل هون" autocomplete="off"><button class="btn primary block" data-act="dkAct">تفعيل</button><p id="act-msg" class="formerr" role="alert"></p></div>`; }
+function dkCard() { return DK_PRO ? '<div class="card"><b>⭐ النسخة الكاملة مفعّلة</b></div>' : `<div class="card stack-s"><b>النسخة المجانية</b><p class="small muted">حتى ${DK_FREE_P} مواد و${DK_FREE_C} زبائن. للتفعيل:</p></div>${dkBlock()}`; }
+function dkLimit(kind) { if (DK_PRO) return; sheet(`<div class="grab"></div><h2>وصلت حد النسخة المجانية</h2><div class="stack"><p>النسخة المجانية فيها حتى ${DK_FREE_P} مواد و${DK_FREE_C} زبائن. فعّل النسخة الكاملة لتكمل بدون حد، وكل بياناتك تبقى.</p>${dkBlock()}</div>`); const e = new Error('limit'); e.dkLimit = true; throw e; }
+function dkPutCheck(store, rec) { if (DK_PRO) return; if (store === 'products' && !S.products.some((x) => x.id === rec.id) && S.products.length >= DK_FREE_P) dkLimit('p'); if (store === 'customers' && !S.customers.some((x) => x.id === rec.id) && S.customers.length >= DK_FREE_C) dkLimit('c'); }
+Object.assign(ACT, { dkAct: async () => { const c = document.getElementById('act-code').value.trim(); const msg = document.getElementById('act-msg'); if (await dkVerify(c)) { try { localStorage.setItem('dk_act', c); } catch (e) { /* ignore */ } location.reload(); } else msg.textContent = 'الكود غير صحيح لهذا الجهاز. تأكد أنك نسخته كاملاً.'; } });
 
 /* ================= supplier invoice: photo -> text (offline OCR) -> stock lines ================= */
 const mgPrice = (p, newCost) => {
@@ -2377,6 +2374,7 @@ Object.assign(ACT, {
       lines.push({ r, q, pr, per });
     }
     if (!lines.length) { err.textContent = 'ما في أصناف محددة.'; return; }
+    if (!DK_PRO) { const nn = lines.filter((x) => x.r.pid === '__new').length; if (S.products.length + nn > DK_FREE_P) { try { dkLimit('p'); } catch (e) { /* sheet shown */ } return; } }
     for (const { r, q, pr, per } of lines) {
       let p = r.pid === '__new' ? null : by('products', r.pid);
       if (!p) { const o = upsertProduct({ name: r.name, price: 0, cur: PUR.cur, cat: 'أخرى', cost: 0, sup: PUR.sup || '' }); p = o.rec; if (per > 1) { p.pack = per; put('products', p); } }
@@ -2398,7 +2396,7 @@ document.addEventListener('change', (e) => {
 });
 
 (async function init() {
-  await loadAll(); migrate(); applyTheme(); i18nInit(); if (!(await actCheck())) { actScreen(); return; } if (S.set.pin) LOCKED = true;
+  await loadAll(); migrate(); applyTheme(); i18nInit(); DK_PRO = await actCheck(); if (S.set.pin) LOCKED = true;
   try { history.replaceState({ d: 0 }, ''); } catch (e) { /* ignore */ }
   render(true); takeSnapshot().catch(() => {}); loadPhotos().catch(() => {});
   try { if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) navigator.serviceWorker.register('./sw.js').catch(() => {}); } catch (e) { /* ignore */ }
