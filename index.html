@@ -2227,28 +2227,41 @@ document.addEventListener('visibilitychange', () => { if (!S.set.pin) return; if
 
 /* ---------- start ---------- */
 /* ================= Allakan Apps: activation (paid app) ================= */
-const DK_WA = '963991139886', DK_PUB = 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE7b8NeXFnuJnT1w9ZavQk+ypAZ26DBHstP1Lc39Jxte+/I37yyvJ8uLdvM2Zsrweu44pRvloPoe74GSO/Yv1aHg==', DK_PACK = 'd1';
+const DK_WA = '963991139886', DK_PUB = 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE7b8NeXFnuJnT1w9ZavQk+ypAZ26DBHstP1Lc39Jxte+/I37yyvJ8uLdvM2Zsrweu44pRvloPoe74GSO/Yv1aHg==', DK_PACK = 'd1', DK_VC = 2, DK_VURL = 'https://allakanapps-lgtm.github.io/dukkani/version.txt', DK_DLURL = '';
 let DK_DID = ''; try { DK_DID = localStorage.getItem('dk_did') || ''; if (!DK_DID) { const a = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; let x = ''; for (const b of crypto.getRandomValues(new Uint8Array(8))) x += a[b % 32]; DK_DID = x; localStorage.setItem('dk_did', x); } } catch (e) { DK_DID = DK_DID || 'NOSTORAGE'; }
 const dkB64 = (s) => { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; return Uint8Array.from(atob(s), (c) => c.charCodeAt(0)); };
 function dkDer2Raw(d) { if (d[0] !== 0x30) return null; let i = 2; if (d[1] & 0x80) i = 2 + (d[1] & 0x7f); const rd = () => { if (d[i] !== 2) return null; const l = d[i + 1]; i += 2; let v = d.slice(i, i + l); i += l; while (v.length > 32 && v[0] === 0) v = v.slice(1); const o = new Uint8Array(32); o.set(v, 32 - v.length); return o; }; const r = rd(), s = rd(); if (!r || !s) return null; const o = new Uint8Array(64); o.set(r); o.set(s, 32); return o; }
+/* الباقات حسب عدد المواد (الزبائن بلا حد بكل الباقات المدفوعة) */
+const DK_TIERS = [['mini', '🛒 دكان صغير', 'حتى 200 مادة', 200], ['shop', '🏪 دكان', 'حتى 1000 مادة', 1000], ['market', '🏬 سوبرماركت', 'حتى 5000 مادة', 5000], ['big', '👑 كبير', 'مواد بلا حد', 1e9]];
+function dkPackInfo(p) { const t = DK_TIERS.find((x) => x[0] === p); if (t) return { cap: t[3], name: t[1] }; if (p === DK_PACK) return { cap: 1e9, name: '👑 كبير' }; const m = /^trial(\d{8})$/.exec(p || ''); if (m) return { cap: 1e9, name: '🎁 تجربة', end: new Date(+m[1].slice(0, 4), +m[1].slice(4, 6) - 1, +m[1].slice(6, 8), 23, 59, 59).getTime() }; return null; }
 async function dkVerify(code) {
   try {
     const m = String(code || '').trim().match(/^([A-Za-z0-9]+)-([A-Za-z0-9_-]+)$/); if (!m || !crypto.subtle) return false; let sig = dkB64(m[2]); if (sig.length !== 64) sig = dkDer2Raw(sig); if (!sig) return false;
     const key = await crypto.subtle.importKey('spki', dkB64(DK_PUB), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
-    return m[1] === DK_PACK && await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, key, sig, new TextEncoder().encode(DK_DID + '|' + m[1]));
+    const ok = await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, key, sig, new TextEncoder().encode(DK_DID + '|' + m[1]));
+    return ok && dkPackInfo(m[1]) ? m[1] : false;
   } catch (e) { return false; }
 }
-async function actCheck() { let c = ''; try { c = localStorage.getItem('dk_act') || ''; } catch (e) { /* ignore */ } return c ? dkVerify(c) : false; }
-let DK_PRO = false; const DK_FREE_P = 5, DK_FREE_C = 2;
-function dkBlock() { const did = DK_DID.replace(/(.{4})/g, '$1-').slice(0, -1); const wa = `https://wa.me/${DK_WA}?text=${encodeURIComponent('Dukkani app (Allakan Apps) - activation\nDevice ID: ' + DK_DID + '\nPack: ' + DK_PACK)}`;
-  return `<div class="card stack-s"><b>⭐ النسخة الكاملة</b><p class="small muted">بدون حد للمواد والزبائن، وتعمل كل الميزات.</p>
-  <a class="btn primary block" target="_blank" rel="noopener" href="${wa}" style="display:block;text-align:center;text-decoration:none">💬 اطلب كود التفعيل عبر واتساب</a>
+let DK_PRO = false, DK_INFO = null, DK_PK = ''; const DK_FREE_P = 5, DK_FREE_C = 2;
+const dkLS = (k, v) => { try { if (v === undefined) return localStorage.getItem(k) || ''; if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch (e) { /* ignore */ } return ''; };
+async function actCheck() {
+  const c = dkLS('dk_act'); if (!c) return false; const p = await dkVerify(c); const info = p && dkPackInfo(p); if (!info) return false;
+  if (info.end) { const n = Date.now(); const seen = Math.max(n, +dkLS('dk_seen') || 0); dkLS('dk_seen', String(seen)); if (n > info.end || seen > info.end || n < seen - 864e5) { dkLS('dk_tdone', '1'); dkLS('dk_act', null); return false; } info.left = Math.max(0, Math.ceil((info.end - n) / 864e5)); }
+  DK_INFO = info; DK_PK = p; return true;
+}
+const dkCapP = () => (DK_PRO && DK_INFO ? DK_INFO.cap : DK_FREE_P);
+const dkWaPack = (p) => `https://wa.me/${DK_WA}?text=${encodeURIComponent('Dukkani app (Allakan Apps) - activation request\nDevice ID: ' + DK_DID + '\nPack: ' + p)}`;
+function dkTierRows() { return DK_TIERS.map((t) => { const inc = DK_PRO && t[3] <= dkCapP(); return `<div class="between" style="padding:6px 0"><div><b>${t[1]}</b><div class="small muted">${t[2]}</div></div>${inc ? '<span class="small">✔ مشمولة</span>' : `<a class="btn sm primary" target="_blank" rel="noopener" href="${dkWaPack(t[0])}">اطلب</a>`}</div>`; }).join(''); }
+function dkBlock() { const did = DK_DID.replace(/(.{4})/g, '$1-').slice(0, -1);
+  return `<div class="card stack-s"><b>⭐ الباقات (حسب عدد المواد)</b><p class="small muted">كل الباقات تفتح كل الميزات، والزبائن بلا حد. الفرق بعدد المواد فقط. دفعة وحدة بدون اشتراك. الأسعار عبر واتساب.</p>${dkTierRows()}
+  <div class="between" style="padding:6px 0"><div><b>🎁 تجربة 7 أيام</b><div class="small muted">كل الميزات لمدة محدودة</div></div>${dkLS('dk_tdone') ? '<span class="small">استُخدمت</span>' : `<a class="btn sm" target="_blank" rel="noopener" href="${dkWaPack('trial')}">اطلب</a>`}</div>
   <div class="small muted">رقم جهازك: <b dir="ltr">${did}</b></div>
   <input class="in" id="act-code" dir="ltr" placeholder="الصق كود التفعيل هون" autocomplete="off"><button class="btn primary block" data-act="dkAct">تفعيل</button><p id="act-msg" class="formerr" role="alert"></p></div>`; }
-function dkCard() { return DK_PRO ? '<div class="card"><b>⭐ النسخة الكاملة مفعّلة</b></div>' : `<div class="card stack-s"><b>النسخة المجانية</b><p class="small muted">حتى ${DK_FREE_P} مواد و${DK_FREE_C} زبائن. للتفعيل:</p></div>${dkBlock()}`; }
-function dkLimit(kind) { if (DK_PRO) return; sheet(`<div class="grab"></div><h2>وصلت حد النسخة المجانية</h2><div class="stack"><p>النسخة المجانية فيها حتى ${DK_FREE_P} مواد و${DK_FREE_C} زبائن. فعّل النسخة الكاملة لتكمل بدون حد، وكل بياناتك تبقى.</p>${dkBlock()}</div>`); const e = new Error('limit'); e.dkLimit = true; throw e; }
-function dkPutCheck(store, rec) { if (DK_PRO) return; if (store === 'products' && !S.products.some((x) => x.id === rec.id) && S.products.length >= DK_FREE_P) dkLimit('p'); if (store === 'customers' && !S.customers.some((x) => x.id === rec.id) && S.customers.length >= DK_FREE_C) dkLimit('c'); }
-Object.assign(ACT, { dkAct: async () => { const c = document.getElementById('act-code').value.trim(); const msg = document.getElementById('act-msg'); if (await dkVerify(c)) { try { localStorage.setItem('dk_act', c); } catch (e) { /* ignore */ } location.reload(); } else msg.textContent = 'الكود غير صحيح لهذا الجهاز. تأكد أنك نسخته كاملاً.'; } });
+function dkCard() { if (DK_PRO) { const cp = dkCapP(); return `<div class="card stack-s"><b>✅ مفعّلة: ${DK_INFO.name}</b><p class="small muted">${cp >= 1e8 ? 'مواد بلا حد' : 'حتى ' + cp + ' مادة'} · ${S.products.length} مادة حالياً${DK_INFO.end ? ' · تنتهي بعد ' + DK_INFO.left + ' يوم' : ''}</p></div>${cp >= 1e8 && !DK_INFO.end ? '' : dkBlock()}`; } return `<div class="card stack-s"><b>النسخة المجانية</b><p class="small muted">حتى ${DK_FREE_P} مواد و${DK_FREE_C} زبائن. للتفعيل:</p></div>${dkBlock()}`; }
+function dkLimit(kind) { const cp = dkCapP(); const t = kind === 'c' ? `النسخة المجانية فيها حتى ${DK_FREE_C} زبائن. فعّل إحدى الباقات لتكمل بدون حد، وكل بياناتك تبقى.` : DK_PRO ? `باقتك الحالية تتسع لـ ${cp} مادة. لإضافة المزيد يلزم ترقية الباقة، وكل بياناتك تبقى.` : `النسخة المجانية فيها حتى ${DK_FREE_P} مواد و${DK_FREE_C} زبائن. فعّل إحدى الباقات لتكمل، وكل بياناتك تبقى.`; sheet(`<div class="grab"></div><h2>🔒 وصلت للحد الأقصى</h2><div class="stack"><p>${t}</p>${dkBlock()}</div>`); const e = new Error('limit'); e.dkLimit = true; throw e; }
+function dkPutCheck(store, rec) { if (store === 'products' && !S.products.some((x) => x.id === rec.id) && S.products.length >= dkCapP()) dkLimit('p'); if (!DK_PRO && store === 'customers' && !S.customers.some((x) => x.id === rec.id) && S.customers.length >= DK_FREE_C) dkLimit('c'); }
+async function dkUpd() { if (DK_VURL.startsWith('__') || !navigator.onLine) return; if (Date.now() - (+dkLS('dk_updt') || 0) < 864e5) return; try { const c = new AbortController(); setTimeout(() => c.abort(), 7000); const r = await fetch(DK_VURL + (DK_VURL.includes('?') ? '&' : '?') + 't=' + Date.now(), { signal: c.signal, cache: 'no-store' }); if (!r.ok) return; const t = (await r.text()).trim().split(/\s+/); dkLS('dk_updt', String(Date.now())); if (parseFloat(t[0]) > DK_VC) { const link = t[1] && /^https?:/.test(t[1]) ? t[1] : DK_DLURL; sheet(`<div class="grab"></div><h2>🔄 يتوفر تحديث جديد</h2><div class="stack"><p>صدر إصدار جديد من دكّاني بميزات وتحسينات. بياناتك تبقى محفوظة بعد التحديث.</p>${!link || link.startsWith('__') ? '' : `<a class="btn primary block" href="${link}" target="_blank" rel="noopener" style="display:block;text-align:center;text-decoration:none">⬇️ تحميل التحديث</a>`}</div>`); } } catch (e) { /* offline */ } }
+Object.assign(ACT, { dkAct: async () => { const c = document.getElementById('act-code').value.trim(); const msg = document.getElementById('act-msg'); const p = await dkVerify(c); const info = p && dkPackInfo(p); if (!info) { msg.textContent = 'الكود غير صحيح لهذا الجهاز. تأكد أنك نسخته كاملاً.'; return; } if (info.end && (dkLS('dk_tdone') || info.end < Date.now())) { msg.textContent = 'انتهت صلاحية كود التجربة أو استُخدمت من قبل.'; return; } dkLS('dk_act', c); location.reload(); } });
 
 /* ================= supplier invoice: photo -> text (offline OCR) -> stock lines ================= */
 const mgPrice = (p, newCost) => {
@@ -2375,7 +2388,7 @@ Object.assign(ACT, {
       lines.push({ r, q, pr, per });
     }
     if (!lines.length) { err.textContent = 'ما في أصناف محددة.'; return; }
-    if (!DK_PRO) { const nn = lines.filter((x) => x.r.pid === '__new').length; if (S.products.length + nn > DK_FREE_P) { try { dkLimit('p'); } catch (e) { /* sheet shown */ } return; } }
+    { const nn = lines.filter((x) => x.r.pid === '__new').length; if (S.products.length + nn > dkCapP()) { try { dkLimit('p'); } catch (e) { /* sheet shown */ } return; } }
     for (const { r, q, pr, per } of lines) {
       let p = r.pid === '__new' ? null : by('products', r.pid);
       if (!p) { const o = upsertProduct({ name: r.name, price: 0, cur: PUR.cur, cat: 'أخرى', cost: 0, sup: PUR.sup || '' }); p = o.rec; if (per > 1) { p.pack = per; put('products', p); } }
@@ -2423,11 +2436,11 @@ Object.assign(ACT, {
 });
 
 (async function init() {
-  await loadAll(); migrate(); applyTheme(); i18nInit(); DK_PRO = await actCheck(); if (S.set.pin) LOCKED = true;
+  await loadAll(); migrate(); applyTheme(); i18nInit(); DK_PRO = await actCheck(); dkUpd(); if (S.set.pin) LOCKED = true;
   try { history.replaceState({ d: 0 }, ''); } catch (e) { /* ignore */ }
   render(true); takeSnapshot().catch(() => {}); loadPhotos().catch(() => {});
   try { if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) navigator.serviceWorker.register('./sw.js').catch(() => {}); } catch (e) { /* ignore */ }
-  window.__dk = { parseInvoiceText, ocrMakeRows, mgPrice, dkVerify, Scan, S, ean13Svg, curRate, go, tab, ACT, VIEWS, setLangUI, i18nRun, put, makeSale, addLedger, addExpense, soonOut, summaryText, makePurchase, makePurchaseReturn, undoPurchase, supBalance, cashBalance };
+  window.__dk = { dkState: () => [DK_PRO, dkCapP(), DK_INFO && DK_INFO.name], dkCapP, parseInvoiceText, ocrMakeRows, mgPrice, dkVerify, Scan, S, ean13Svg, curRate, go, tab, ACT, VIEWS, setLangUI, i18nRun, put, makeSale, addLedger, addExpense, soonOut, summaryText, makePurchase, makePurchaseReturn, undoPurchase, supBalance, cashBalance };
   const snaps = await listSnaps().catch(() => []); window.__snaps = snaps;
 })();
 VIEWS_BACKUP_PATCH: {
