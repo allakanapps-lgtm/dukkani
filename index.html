@@ -1092,7 +1092,7 @@ VIEWS.products = () => {
   return `${top('المخزون', { back: false, right: `<button class="iconbtn" data-act="lookup" aria-label="مسح باركود">${ic('barcode')}</button><button class="iconbtn" data-act="productNew" aria-label="إضافة منتج" style="background:var(--brand);color:var(--brand-ink);border-color:var(--brand)">${ic('plus')}</button>` })}
   <div class="stack"><div class="search">${ic('search')}<input class="in" data-input="plist" placeholder="ابحث بالاسم أو الباركود" value="${esc(V.p.q || '')}" autocomplete="off"></div>
   <div class="chips">${[['all', 'الكل'], ['low', 'ناقص'], ['out', 'نفد'], ['exp', 'قريب الانتهاء']].concat(cats.map((c) => ['c:' + c, c])).concat(S.suppliers.map((s) => ['s:' + s.id, '🚚 ' + s.name])).map(([k, t]) => `<button class="chip ${f === k ? 'on' : ''}" data-act="pfilter" data-k="${esc(k)}">${esc(t)}</button>`).join('')}</div>
-  <div class="small muted between"><span>${S.products.length} منتج · قيمة المخزون (تكلفة) ${fmtS(sv.cost)}</span><span class="gap"><button class="btn sm" data-act="presetSheet">أصناف جاهزة</button><button class="btn sm" data-act="go" data-v="warehouse">تقرير المستودع</button><button class="btn sm" data-act="go" data-v="stocktake">جرد</button></span></div>
+  <div class="small muted between"><span>${S.products.length} منتج · قيمة المخزون (تكلفة) ${fmtS(sv.cost)}</span><span class="gap"><button class="btn sm" data-act="presetSheet">أصناف جاهزة</button><button class="btn sm" data-act="priOcr">📷 تصوير قائمة أسعار</button><button class="btn sm" data-act="priOcrG">🖼️ من المعرض</button><button class="btn sm" data-act="go" data-v="warehouse">تقرير المستودع</button><button class="btn sm" data-act="go" data-v="stocktake">جرد</button></span></div>
   <div id="plist">${plistHtml()}</div></div>`;
 };
 VIEWS.stocktake = () => `${top('جرد المخزون')}<div class="stack"><p class="small muted">اكتب الكمية الفعلية الموجودة على الرف. عند الخروج من الخانة تُحفظ ويُسجَّل الفرق في سجل المخزون.</p>
@@ -2227,7 +2227,7 @@ document.addEventListener('visibilitychange', () => { if (!S.set.pin) return; if
 
 /* ---------- start ---------- */
 /* ================= Allakan Apps: activation (paid app) ================= */
-const DK_WA = '963991139886', DK_PUB = 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE7b8NeXFnuJnT1w9ZavQk+ypAZ26DBHstP1Lc39Jxte+/I37yyvJ8uLdvM2Zsrweu44pRvloPoe74GSO/Yv1aHg==', DK_PACK = 'd1', DK_VC = 2, DK_VURL = 'https://allakanapps-lgtm.github.io/dukkani/version.txt', DK_DLURL = '';
+const DK_WA = '963991139886', DK_PUB = 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE7b8NeXFnuJnT1w9ZavQk+ypAZ26DBHstP1Lc39Jxte+/I37yyvJ8uLdvM2Zsrweu44pRvloPoe74GSO/Yv1aHg==', DK_PACK = 'd1', DK_VC = 3, DK_VURL = 'https://allakanapps-lgtm.github.io/dukkani/version.txt', DK_DLURL = '';
 let DK_DID = ''; try { DK_DID = localStorage.getItem('dk_did') || ''; if (!DK_DID) { const a = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; let x = ''; for (const b of crypto.getRandomValues(new Uint8Array(8))) x += a[b % 32]; DK_DID = x; localStorage.setItem('dk_did', x); } } catch (e) { DK_DID = DK_DID || 'NOSTORAGE'; }
 const dkB64 = (s) => { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; return Uint8Array.from(atob(s), (c) => c.charCodeAt(0)); };
 function dkDer2Raw(d) { if (d[0] !== 0x30) return null; let i = 2; if (d[1] & 0x80) i = 2 + (d[1] & 0x7f); const rd = () => { if (d[i] !== 2) return null; const l = d[i + 1]; i += 2; let v = d.slice(i, i + l); i += l; while (v.length > 32 && v[0] === 0) v = v.slice(1); const o = new Uint8Array(32); o.set(v, 32 - v.length); return o; }; const r = rd(), s = rd(); if (!r || !s) return null; const o = new Uint8Array(64); o.set(r); o.set(s, 32); return o; }
@@ -2273,7 +2273,7 @@ const mgPrice = (p, newCost) => {
 };
 const costIn = (p, uc, cur) => (cur === p.cur ? uc : !(curRate() > 0) ? NaN : p.cur === 'USD' ? uc / curRate() : uc * curRate());
 const OCR_SKIP = /(مجموع|المجموع|إجمالي|اجمالي|الاجمالي|الإجمالي|صافي|خصم|ضريبة|رصيد|مدفوع|المتبقي|الباقي|تاريخ|هاتف|جوال|موبايل|فاتورة|العنوان|المورد|التوقيع|المستلم|شكرا|الكمية|السعر|الصنف|البيان|الإفرادي|total|subtotal|invoice|date|tel|phone|qty|price|amount|balance|vat|tax|discount)/i;
-function parseInvoiceText(text) {
+function parseInvoiceText(text, priceOnly) {
   const out = []; const UNIT = '(?:كغ|كيلو|كج|kg|KG|Kg|غرام|جرام|غ|gr|gm|g|ml|ملل|مل|لتر|ل|L|l|سم|cm|متر)';
   for (let raw of String(text || '').split(/\n+/)) {
     let t = normDigits(raw).replace(/،/g, ',').replace(/(\d),(?=\d{3}(?!\d))/g, '$1').replace(/[|_~•·●■□▪◦]/g, ' ').replace(/\s+/g, ' ').trim(); if (!t) continue;
@@ -2283,9 +2283,9 @@ function parseInvoiceText(text) {
     const re = new RegExp('(\\d+(?:\\.\\d+)?)\\s*(' + UNIT + ')?(?![\\p{L}\\d])', 'gu'); const nums = []; const keep = []; let m;
     while ((m = re.exec(t))) { if (m[2]) keep.push([m.index, re.lastIndex]); else nums.push({ v: +m[1], i: m.index, e: re.lastIndex }); }
     if (!nums.length) continue;
-    let q = null, pr = null, flag = false; let c = nums.map((x) => x.v);
+    let q = null, pr = null, flag = false; let c = nums.map((x) => x.v); if (priceOnly) { q = 1; pr = c[c.length - 1]; }
     const rel = (a, b, k) => a > 0 && b >= 0 && k > 0 && Math.abs(a * b - k) <= Math.max(0.011 * k, 0.011);
-    if (c.length >= 3) {
+    if (q === null && c.length >= 3) {
       const l3 = c.slice(-3); let f = null; const P = [[0, 1, 2], [1, 0, 2], [0, 2, 1], [2, 0, 1], [1, 2, 0], [2, 1, 0]];
       for (const [a, b, k] of P) { if (rel(l3[a], l3[b], l3[k]) && l3[a] <= 5000) { if (!f || l3[a] < f[0]) f = [l3[a], l3[b]]; } }
       if (f) { q = f[0]; pr = f[1]; } else { c = c.slice(-2); }
@@ -2316,10 +2316,11 @@ function ocrCands(name, bc) {
   return o.sort((a, b) => b.s - a.s).slice(0, 8);
 }
 let OCRR = null;
-function ocrMakeRows(text) {
-  return parseInvoiceText(text).map((r) => { const c = ocrCands(r.name, r.bc); const best = c[0] && c[0].s >= 9 ? c[0].p : null; const per = best ? (Number(best.pack) || 1) : 1; return { inc: true, name: r.name, qty: String(r.qty), price: String(r.price), per: String(per), perEdit: false, pid: best ? best.id : '__new', cands: c.map((x) => x.p.id), flag: r.flag, raw: r.raw }; });
+function ocrMakeRows(text, priceOnly) {
+  return parseInvoiceText(text, priceOnly).map((r) => { const c = ocrCands(r.name, r.bc); const best = c[0] && c[0].s >= 9 ? c[0].p : null; const per = best ? (Number(best.pack) || 1) : 1; return { inc: true, name: r.name, qty: String(r.qty), price: String(r.price), per: String(per), perEdit: false, pid: best ? best.id : '__new', cands: c.map((x) => x.p.id), flag: r.flag, raw: r.raw }; });
 }
 function ocrPrev(i) {
+  if (OCRR.mode === 'u') return ocrPrevU(i);
   const r = OCRR.rows[i], el = document.getElementById('orp-' + i); if (!el) return; const q = toNum(r.qty), pr = toNum(r.price), per = OCRR.mode === 'c' ? toNum(r.per) : 1;
   if (!(q > 0 && pr >= 0 && per > 0)) { el.innerHTML = '<span class="muted">راجع الأرقام</span>'; return; }
   const uc = pr / per; const p = by('products', r.pid); const cur = PUR ? PUR.cur : 'USD'; let h = `${fmtQ(q)} × ${fmtQ(per)} = <b>${fmtQ(q * per)}</b> قطعة · تكلفة القطعة <b>${money(uc, cur)}</b>`;
@@ -2333,8 +2334,8 @@ function ocrRowHtml(r, i) {
   <label class="gap"><input type="checkbox" data-ocr="inc" data-i="${i}" ${r.inc ? 'checked' : ''}> <b>اسم الصنف في الفاتورة</b></label>
   <input class="in" data-ocr="name" data-i="${i}" value="${esc(r.name)}" autocomplete="off">
   <div class="field"><label>الصنف في مخزونك</label><select class="in" id="ors-${i}" data-ocr="pid" data-i="${i}">${sel.map(([k, t]) => `<option value="${esc(k)}" ${String(k) === String(r.pid) ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></div>
-  <div class="two"><div class="field"><label>الكمية</label><input class="in" inputmode="decimal" data-ocr="qty" data-i="${i}" value="${esc(r.qty)}"></div>
-  <div class="field"><label>${OCRR.mode === 'c' ? 'سعر الكرتونة' : 'سعر القطعة'}</label><input class="in" inputmode="decimal" data-ocr="price" data-i="${i}" value="${esc(r.price)}"></div></div>
+  ${OCRR.mode === 'u' ? `<div class="field"><label>السعر في القائمة (للقطعة)</label><input class="in" inputmode="decimal" data-ocr="price" data-i="${i}" value="${esc(r.price)}"></div>` : `<div class="two"><div class="field"><label>الكمية</label><input class="in" inputmode="decimal" data-ocr="qty" data-i="${i}" value="${esc(r.qty)}"></div>
+  <div class="field"><label>${OCRR.mode === 'c' ? 'سعر الكرتونة' : 'سعر القطعة'}</label><input class="in" inputmode="decimal" data-ocr="price" data-i="${i}" value="${esc(r.price)}"></div></div>`}
   ${OCRR.mode === 'c' ? `<div class="field"><label>القطع بالكرتونة</label><input class="in" id="orper-${i}" inputmode="decimal" data-ocr="per" data-i="${i}" value="${esc(r.per)}"></div>` : ''}
   <div class="small" id="orp-${i}"></div></div>`;
 }
@@ -2343,11 +2344,11 @@ function ocrSheet(msg) {
   sheet(`<div class="grab"></div><h2>قراءة الفاتورة</h2><div class="stack">
   ${msg ? `<p class="small" style="color:var(--warn)">${esc(msg)}</p>` : ''}
   <p class="small muted">راجع كل سطر وصحّح الأرقام والأصناف قبل الإضافة. قراءة الصورة غير مضمونة 100%، خصوصاً الخط اليدوي.</p>
-  <div class="field"><label>الكميات والأسعار في الفاتورة هي لكل</label><select class="in" id="ocr-mode" data-ocr="mode"><option value="c" ${OCRR.mode === 'c' ? 'selected' : ''}>كرتونة (أحدد القطع بالكرتونة)</option><option value="p" ${OCRR.mode === 'p' ? 'selected' : ''}>قطعة</option></select></div>
-  <p class="small muted">عملة الفاتورة: <b>${cur === 'USD' ? 'دولار $' : 'ليرة'}</b> (تتغيّر من شاشة الفاتورة)</p>
+  <div class="field"><label>الكميات والأسعار في الفاتورة هي لكل</label><select class="in" id="ocr-mode" data-ocr="mode"><option value="c" ${OCRR.mode === 'c' ? 'selected' : ''}>كرتونة (أحدد القطع بالكرتونة)</option><option value="p" ${OCRR.mode === 'p' ? 'selected' : ''}>قطعة</option>${OCRR.priceOnly ? `<option value="u" ${OCRR.mode === 'u' ? 'selected' : ''}>قائمة أسعار (تحديث الأسعار فقط)</option>` : ''}</select></div>
+  ${OCRR.mode === 'u' ? `<div class="two"><div class="field"><label>الأسعار هي</label><select class="in" data-ocr="pk"><option value="cost" ${OCRR.pk !== 'sell' ? 'selected' : ''}>تكلفة (سعر الجملة)</option><option value="sell" ${OCRR.pk === 'sell' ? 'selected' : ''}>سعر البيع للزبون</option></select></div><div class="field"><label>العملة</label><select class="in" data-ocr="cur"><option value="SYP" ${OCRR.cur === 'SYP' ? 'selected' : ''}>ليرة</option><option value="USD" ${OCRR.cur === 'USD' ? 'selected' : ''}>دولار $</option></select></div></div><p class="small muted">المخزون والكميات ما بتتغيّر، بس الأسعار.</p>` : `<p class="small muted">عملة الفاتورة: <b>${cur === 'USD' ? 'دولار $' : 'ليرة'}</b> (تتغيّر من شاشة الفاتورة)</p>`}
   <div id="ocr-rows" class="stack-s">${OCRR.rows.length ? OCRR.rows.map(ocrRowHtml).join('') : '<p class="muted">ما قدرت أطلع أصنافاً من النص. عدّل النص تحت واضغط «تحليل النص».</p>'}</div>
   <details ${OCRR.rows.length ? '' : 'open'}><summary>النص المقروء (قابل للتعديل)</summary><textarea class="in" id="ocr-raw" rows="8" style="min-height:140px" dir="auto">${esc(OCRR.text)}</textarea><button class="btn sm" data-act="ocrParse" type="button" style="margin-top:6px">تحليل النص</button></details>
-  <p class="formerr" role="alert" id="ocr-err"></p><button class="btn primary block" data-act="ocrApply" ${OCRR.rows.length ? '' : 'disabled'}>إضافة الأصناف المحددة للفاتورة</button></div>`);
+  <p class="formerr" role="alert" id="ocr-err"></p><button class="btn primary block" data-act="ocrApply" ${OCRR.rows.length ? '' : 'disabled'}>${OCRR.mode === 'u' ? 'تحديث الأسعار' : 'إضافة الأصناف المحددة للفاتورة'}</button></div>`);
   OCRR.rows.forEach((_, i) => ocrPrev(i));
 }
 function ocrLoadLib() {
@@ -2381,6 +2382,7 @@ Object.assign(ACT, {
   },
   ocrParse: () => { OCRR.text = val('ocr-raw'); OCRR.rows = ocrMakeRows(OCRR.text); ocrSheet(''); },
   ocrApply: () => {
+    if (OCRR.mode === 'u') return ocrApplyPrices();
     const err = document.getElementById('ocr-err'); const lines = []; const ex = [];
     for (const [i, r] of OCRR.rows.entries()) {
       if (!r.inc || r.pid === '__skip') continue; const q = toNum(r.qty), pr = toNum(r.price), per = OCRR.mode === 'c' ? toNum(r.per) : 1;
@@ -2403,7 +2405,8 @@ document.addEventListener('input', (e) => {
 });
 document.addEventListener('change', (e) => {
   const d = e.target.dataset; if (!d || !d.ocr || !OCRR) return;
-  if (d.ocr === 'mode') { OCRR.mode = e.target.value; ocrSheet(''); return; } const i = +d.i, r = OCRR.rows[i]; if (!r) return;
+  if (d.ocr === 'pk') { OCRR.pk = e.target.value; OCRR.rows.forEach((_, i) => ocrPrev(i)); return; } if (d.ocr === 'cur') { OCRR.cur = e.target.value; OCRR.rows.forEach((_, i) => ocrPrev(i)); return; }
+  if (d.ocr === 'mode') { const was = OCRR.mode; OCRR.mode = e.target.value; if (OCRR.priceOnly && (was === 'u') !== (OCRR.mode === 'u')) OCRR.rows = ocrMakeRows(OCRR.text, OCRR.mode === 'u'); ocrSheet(''); return; } const i = +d.i, r = OCRR.rows[i]; if (!r) return;
   if (d.ocr === 'inc') { r.inc = e.target.checked; return; }
   if (d.ocr === 'pid') { r.pid = e.target.value; const p = by('products', r.pid); if (p && !r.perEdit) { r.per = String(Number(p.pack) || 1); const el = document.getElementById('orper-' + i); if (el) el.value = r.per; } ocrPrev(i); return; }
   if (d.ocr === 'name') { r.name = e.target.value; const c = ocrCands(r.name, ''); r.cands = c.map((x) => x.p.id); r.pid = c[0] && c[0].s >= 9 ? c[0].p.id : '__new'; const row = document.getElementById('orow-' + i); if (row) { const h = document.createElement('div'); h.innerHTML = ocrRowHtml(r, i); row.replaceWith(h.firstElementChild); ocrPrev(i); } }
@@ -2435,12 +2438,54 @@ Object.assign(ACT, {
   mbRun: () => { const r = mgBulkRows(), el = document.getElementById('mb-prev'); if (!r) { el.textContent = 'اكتب النسبة أولاً.'; return; } if (!r.length) { el.textContent = 'ما في أصناف تتغيّر.'; return; } for (const x of r) { x.p.price = x.np; x.p.updated = Date.now(); put('products', x.p); } toast('تم تحديث أسعار ' + r.length + ' صنف'); ACT.mbPrev(); },
 });
 
+/* ===== قائمة أسعار من صورة: تحديث الأسعار فقط بدون كميات ===== */
+function ocrPrevU(i) {
+  const r = OCRR.rows[i], el = document.getElementById('orp-' + i); if (!el) return; const pr = toNum(r.price); const p = by('products', r.pid);
+  if (!(pr >= 0)) { el.innerHTML = '<span class="muted">راجع السعر</span>'; return; }
+  const cur = OCRR.cur || 'SYP', kind = OCRR.pk === 'sell' ? 'sell' : 'cost';
+  if (!p) { el.innerHTML = r.pid === '__skip' ? '' : '<span class="muted">صنف جديد (مخزونه 0)</span>'; return; }
+  const v = costIn(p, pr, cur); if (!(v >= 0)) { el.innerHTML = '<span class="muted">سعر الصرف غير محدد لتحويل العملة</span>'; return; }
+  let h = '';
+  if (kind === 'cost') { h = `التكلفة: ${money(p.cost, p.cur)} ← <b>${money(v, p.cur)}</b>`; const np = S.set.autoMgOn !== false ? mgPrice(p, v) : null; if (np != null) h += `<br>سعر البيع: ${money(p.price, p.cur)} ← <b>${money(np, p.cur)}</b>`; }
+  else h = `سعر البيع: ${money(p.price, p.cur)} ← <b>${money(v, p.cur)}</b>`;
+  el.innerHTML = h;
+}
+function ocrApplyPrices() {
+  const err = document.getElementById('ocr-err'); const cur = OCRR.cur || 'SYP', kind = OCRR.pk === 'sell' ? 'sell' : 'cost'; const list = [];
+  for (const [i, r] of OCRR.rows.entries()) {
+    if (!r.inc || r.pid === '__skip') continue; const pr = toNum(r.price);
+    if (!(pr >= 0) || !r.name) { err.textContent = `راجع السطر ${i + 1}: السعر غير صحيح.`; document.getElementById('orow-' + i).scrollIntoView({ block: 'center' }); return; }
+    list.push({ r, pr });
+  }
+  if (!list.length) { err.textContent = 'ما في أصناف محددة.'; return; }
+  const nn = list.filter((x) => x.r.pid === '__new').length; if (S.products.length + nn > dkCapP()) { try { dkLimit('p'); } catch (e) { /* sheet shown */ } return; }
+  let upd = 0, add = 0;
+  for (const { r, pr } of list) {
+    let p = r.pid === '__new' ? null : by('products', r.pid);
+    if (p) {
+      const v = costIn(p, pr, cur); if (!(v >= 0)) { err.textContent = 'حدّد سعر الصرف أولاً (إعدادات) لتحويل العملة.'; return; }
+      if (kind === 'cost') { const oc = Number(p.cost) || 0; const np = S.set.autoMgOn !== false ? mgPrice(Object.assign({}, p, { cost: oc }), v) : null; p.cost = Math.round(v * 10000) / 10000; if (np != null) p.price = np; }
+      else p.price = p.cur === 'USD' ? Math.round(v * 1000) / 1000 : roundStep(v);
+      p.updated = Date.now(); put('products', p); upd++;
+    } else {
+      const base = { name: r.name, cur, cat: 'أخرى', sup: '', price: 0, cost: 0 };
+      if (kind === 'cost') { base.cost = pr; const np = mgPrice({ cost: 0, price: 0, cur }, pr); base.price = np != null ? np : 0; } else base.price = pr;
+      const o = upsertProduct(base); if (o && o.rec) { o.rec.stock = 0; put('products', o.rec); } add++;
+    }
+  }
+  closeSheet(); render(false); toast('حُدّثت أسعار ' + upd + ' صنف' + (add ? ' · أُضيف ' + add + ' صنف جديد' : ''));
+}
+Object.assign(ACT, {
+  priOcrG: () => ACT.priOcr(false),
+  priOcr: (cam) => { const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*'; if (cam !== false) inp.setAttribute('capture', 'environment'); else inp.multiple = true; inp.onchange = async () => { const fs = [...inp.files]; if (!fs.length) return; sheet('<div class="grab"></div><h2>قراءة قائمة الأسعار…</h2><p class="muted" id="ocr-prog">جارٍ التحضير…</p>'); let text = '', err = ''; try { text = await ocrRun(fs); } catch (e) { err = 'تعذّرت القراءة التلقائية: ' + (e && e.message ? e.message : e); } OCRR = { mode: 'u', priceOnly: true, pk: 'cost', cur: S.products.some((x) => x.cur === 'USD') ? 'USD' : 'SYP', text: text.trim(), rows: [] }; if (text.trim()) OCRR.rows = ocrMakeRows(text, true); ocrSheet(err); }; inp.click(); },
+});
+
 (async function init() {
   await loadAll(); migrate(); applyTheme(); i18nInit(); DK_PRO = await actCheck(); dkUpd(); if (S.set.pin) LOCKED = true;
   try { history.replaceState({ d: 0 }, ''); } catch (e) { /* ignore */ }
   render(true); takeSnapshot().catch(() => {}); loadPhotos().catch(() => {});
   try { if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) navigator.serviceWorker.register('./sw.js').catch(() => {}); } catch (e) { /* ignore */ }
-  window.__dk = { dkState: () => [DK_PRO, dkCapP(), DK_INFO && DK_INFO.name], dkCapP, parseInvoiceText, ocrMakeRows, mgPrice, dkVerify, Scan, S, ean13Svg, curRate, go, tab, ACT, VIEWS, setLangUI, i18nRun, put, makeSale, addLedger, addExpense, soonOut, summaryText, makePurchase, makePurchaseReturn, undoPurchase, supBalance, cashBalance };
+  window.__dk = { ocrApplyPrices, setOCRR: (o) => { OCRR = o; }, ocrSheet, dkState: () => [DK_PRO, dkCapP(), DK_INFO && DK_INFO.name], dkCapP, parseInvoiceText, ocrMakeRows, mgPrice, dkVerify, Scan, S, ean13Svg, curRate, go, tab, ACT, VIEWS, setLangUI, i18nRun, put, makeSale, addLedger, addExpense, soonOut, summaryText, makePurchase, makePurchaseReturn, undoPurchase, supBalance, cashBalance };
   const snaps = await listSnaps().catch(() => []); window.__snaps = snaps;
 })();
 VIEWS_BACKUP_PATCH: {
